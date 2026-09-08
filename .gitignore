@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+.vite/
+.local/
+.DS_Store
+*.log
+.env*
+!.env.example
+coverage/
+.cdx/
+.claude/settings.local.json
+*.enc
+*.sqlite
+*.sqlite-*

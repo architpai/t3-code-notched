@@ -1,0 +1,83 @@
+{
+  "name": "t3-code-notched",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An independent, compact desktop surface for T3 Code.",
+  "type": "module",
+  "main": "dist/main/index.cjs",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.13.1"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "demo": "vite --host 127.0.0.1 --port 5178 --strictPort",
+    "build": "node scripts/build.mjs",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "dist": "pnpm build && electron-builder",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@fontsource/geist": "^5.2.0",
+    "@fontsource/geist-mono": "^5.2.0",
+    "lucide-react": "^0.564.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "^0.27.0",
+    "prettier": "^3.8.0",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "5.0.0"
+  },
+  "build": {
+    "appId": "dev.archit.t3-code-notched",
+    "productName": "T3 Code Notched",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!dist/native/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "extraResources": [
+        {
+          "from": "dist/native/notch-geometry",
+          "to": "notch-geometry"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development"
+    }
+  },
+  "author": "T3 Code Notched contributors"
+}

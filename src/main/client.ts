@@ -1,3 +1,5 @@
+import { readUsage } from "./usage";
+import type { UsagePreview } from "../shared/usage";
 import { z } from "zod";
 import {
   id,
@@ -25,6 +27,8 @@ export class T3Client {
   private credential: Credential | null = null;
   private abort = new AbortController();
   private epoch = 0;
+  private usageRead: { at: number; result: Promise<UsagePreview> } | null =
+    null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   constructor(private publish: (state: ViewState) => void) {}
   private emit() {
@@ -32,6 +36,7 @@ export class T3Client {
   }
   disconnect() {
     this.epoch++;
+    this.usageRead = null;
     this.abort.abort();
     this.abort = new AbortController();
     clearTimeout(this.timer);
@@ -170,6 +175,25 @@ export class T3Client {
           ? 1500
           : 4000,
       );
+  }
+  async usage(): Promise<UsagePreview> {
+    const c = this.credential;
+    const epoch = this.epoch;
+    const unavailable = {
+      providers: [],
+      error: "Usage unavailable. Reconnect to T3.",
+    };
+    if (!c || this.state.phase !== "live") return unavailable;
+    if (!this.usageRead || Date.now() - this.usageRead.at >= 60_000) {
+      this.usageRead = {
+        at: Date.now(),
+        result: readUsage(c.origin, c.token, this.abort.signal),
+      };
+    }
+    const result = await this.usageRead.result;
+    return epoch === this.epoch && this.state.phase === "live"
+      ? result
+      : unavailable;
   }
   canOpenThread(threadId: string): boolean {
     const target = id.parse(threadId);

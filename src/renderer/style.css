@@ -86,7 +86,8 @@ button:disabled {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-summary:focus-visible {
+summary:focus-visible,
+.usage-indicator:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -918,17 +919,17 @@ header button:hover:not(:disabled) {
   border-radius: 18px;
 }
 .corner.compact > header {
-  flex-direction: column;
+  flex-direction: row;
   justify-content: center;
   gap: 4px;
-  height: 84px;
-  min-height: 84px;
+  height: 40px;
+  min-height: 40px;
   padding: 8px;
 }
 .corner.compact .summary {
-  flex: 0 0 26px;
+  flex: 1;
   justify-content: center;
-  width: 100%;
+  width: auto;
   padding: 0;
 }
 .corner.compact .summary-text {
@@ -991,4 +992,159 @@ header button:hover:not(:disabled) {
   bottom: 0;
   right: 0;
   left: auto;
+}
+
+.usage-extension {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: var(--usage-width);
+  flex: 0 0 var(--usage-width);
+  height: 32px;
+  border-left: 1px solid var(--border);
+  padding-left: 11px;
+  margin-left: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.usage-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 110px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text);
+}
+.usage-indicator svg {
+  flex-shrink: 0;
+}
+.camera-header .usage-extension {
+  margin-left: 0;
+}
+.edge-left > header,
+.edge-right > header {
+  position: relative;
+  flex-basis: calc(48px + var(--usage-width));
+  padding-right: var(--usage-width);
+}
+.edge-left .usage-extension,
+.edge-right .usage-extension {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+}
+.corner.compact > header {
+  position: relative;
+  padding: 0 8px;
+}
+
+.usage-values {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 1px 8px;
+}
+.usage-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  line-height: 14px;
+}
+.usage-row small {
+  color: var(--muted);
+  font-size: 9px;
+  min-width: 25px;
+}
+.compact .usage-row small {
+  display: none;
+}
+
+.usage-row small {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.usage-settings fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 10px 0;
+  padding: 8px;
+}
+.usage-settings legend {
+  font-weight: 600;
+}
+.usage-settings legend svg {
+  vertical-align: middle;
+}
+.usage-settings table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.usage-settings th {
+  text-align: left;
+  font-weight: 400;
+  padding: 5px 0;
+}
+.usage-settings td,
+.usage-settings th:not(:first-child) {
+  text-align: center;
+  width: 80px;
+}
+.usage-settings button {
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+/* A corner is a vertical stack: brand, status, then provider values. */
+.corner.compact > header {
+  flex-direction: column;
+  justify-content: flex-start;
+  height: 100%;
+  min-height: 0;
+  padding: 8px;
+  gap: 6px;
+}
+.corner.compact .summary {
+  flex: 0 0 26px;
+  width: 100%;
+}
+.corner.compact .state-orbs {
+  min-height: 20px;
+  flex-shrink: 0;
+}
+.corner.compact .state-orbs.many {
+  grid-template-columns: repeat(3, auto);
+}
+.corner.compact .state-orbs.many .state-orb {
+  width: 14px;
+  height: 14px;
+  font-size: 8px;
+}
+.corner.compact .usage-extension {
+  flex: 0 1 var(--corner-usage-height);
+  height: var(--corner-usage-height);
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 0;
+  border-top: 1px solid var(--border);
+  padding: 8px 0 0;
+  margin: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.corner.compact .usage-indicator {
+  flex: 0 0 auto !important;
+  width: 100%;
+  min-height: 20px;
+}
+.corner.compact .usage-values {
+  grid-auto-flow: row;
+  grid-template-rows: none !important;
 }

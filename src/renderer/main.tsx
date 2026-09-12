@@ -20,6 +20,14 @@ import {
   type MessagePreview,
   type DragInput,
 } from "../shared/contracts";
+import { ProviderIcon } from "./ProviderIcon";
+import { UsageSettings } from "./UsageSettings";
+import {
+  providerAllowances,
+  savedUsagePreferencesSchema,
+  type SavedUsagePreferences,
+  type UsagePreview,
+} from "../shared/usage";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { demoBridge } from "./demo";
 import { watchInactivity } from "./inactivity";
@@ -157,6 +165,63 @@ function App() {
       /* Storage can be unavailable. */
     }
   }, [idleSeconds]);
+  const [showUsage, setShowUsage] = useState(() => {
+    try {
+      return localStorage.getItem("notched-show-usage") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [usagePreferences, setUsagePreferences] =
+    useState<SavedUsagePreferences>(() => {
+      try {
+        return savedUsagePreferencesSchema.parse(
+          JSON.parse(localStorage.getItem("notched-usage-preferences") ?? "{}"),
+        );
+      } catch {
+        return {};
+      }
+    });
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "notched-usage-preferences",
+        JSON.stringify(usagePreferences),
+      );
+    } catch {
+      /* Storage can be unavailable. */
+    }
+  }, [usagePreferences]);
+  const environment = state.environmentId ?? "disconnected";
+  const currentUsagePreferences = usagePreferences[environment] ?? {};
+  const [usage, setUsage] = useState<UsagePreview | null>(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem("notched-show-usage", String(showUsage));
+    } catch {
+      /* Storage can be unavailable. */
+    }
+  }, [showUsage]);
+  useEffect(() => {
+    setUsage(null);
+    if (!showUsage || !["live", "demo"].includes(state.phase)) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      const result = await bridge.usage().catch(() => ({
+        providers: [],
+        error: "Usage unavailable. Try again later.",
+      }));
+      if (disposed) return;
+      setUsage(result);
+      timer = setTimeout(() => void refresh(), 60_000);
+    };
+    void refresh();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [showUsage, state.phase, state.environmentId]);
   const [expanded, setExpanded] = useState(demo);
   const [settings, setSettings] = useState(false);
   const [retainReply, setRetainReply] = useState(expanded);
@@ -311,6 +376,74 @@ function App() {
       )}
     </span>
   );
+  const allowances = providerAllowances(
+    usage,
+    expanded,
+    currentUsagePreferences,
+  );
+  const usageVisible =
+    showUsage &&
+    ["live", "demo"].includes(state.phase) &&
+    allowances.length > 0;
+  const usageWidth = usageVisible
+    ? Math.min(
+        600,
+        allowances.reduce(
+          (width, provider) =>
+            width +
+            24 +
+            Math.ceil(provider.rows.length / 2) * (expanded ? 150 : 70),
+          12,
+        ),
+      )
+    : 0;
+  const cornerUsageHeight = usageVisible
+    ? Math.min(
+        240,
+        allowances.reduce(
+          (height, provider) =>
+            height + Math.max(20, provider.rows.length * 14) + 6,
+          12,
+        ),
+      )
+    : 0;
+  const usageSection = usageVisible && (
+    <section
+      className="usage-extension"
+      aria-label="Provider allowances"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {allowances.map((provider) => (
+        <span
+          key={provider.instanceId}
+          className="usage-indicator"
+          style={{
+            flexBasis:
+              24 + Math.ceil(provider.rows.length / 2) * (expanded ? 150 : 70),
+          }}
+          tabIndex={0}
+          title={`${provider.name}\n${provider.title}`}
+          aria-label={`${provider.name}: ${provider.title}`}
+        >
+          <ProviderIcon driver={provider.driver} />
+          <span
+            className="usage-values"
+            style={{
+              gridTemplateRows: `repeat(${Math.min(2, provider.rows.length)}, 14px)`,
+            }}
+          >
+            {provider.rows.map((row) => (
+              <span className="usage-row" key={row.id}>
+                <small>{row.label}</small>
+                {row.text}
+              </span>
+            ))}
+          </span>
+        </span>
+      ))}
+    </section>
+  );
   const settlement = replies.settlements.find((t) =>
     state.shell.threads.some(
       (current) =>
@@ -425,7 +558,8 @@ function App() {
     resizeTask.current = resizeTask.current
       .catch(() => {})
       .then(() => {
-        if (!cancelled) return bridge.resize(height);
+        if (!cancelled)
+          return bridge.resize(height, usageWidth, cornerUsageHeight);
       });
     void resizeTask.current.catch(() =>
       setNotice("Could not resize the notch."),
@@ -433,7 +567,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [height]);
+  }, [height, usageWidth, cornerUsageHeight]);
   useEffect(() => {
     if (restoreDragFocus.current) {
       headerButton.current?.focus();
@@ -461,26 +595,33 @@ function App() {
     }
     dragPoint.current = point;
   };
-  const panelStyle: React.CSSProperties & { "--body-width": string } = {
+  const panelStyle: React.CSSProperties & {
+    "--body-width": string;
+    "--usage-width": string;
+    "--corner-usage-height": string;
+  } = {
+    "--usage-width": `${usageWidth}px`,
+    "--corner-usage-height": `${cornerUsageHeight}px`,
     "--body-width": `${Math.max(1, state.contentWidth)}px`,
     ...(demo
       ? {
           height: Math.min(
             !open && state.corner
-              ? 84
+              ? 76 + cornerUsageHeight
               : Math.max(
                   state.edge === "left" || state.edge === "right" ? 160 : 40,
                   height,
                 ),
             window.innerHeight,
           ),
-          width: open
-            ? 420
-            : state.corner
-              ? 84
-              : state.edge === "left" || state.edge === "right"
-                ? 48
-                : 360,
+          width:
+            (open
+              ? 420
+              : state.corner
+                ? 112
+                : state.edge === "left" || state.edge === "right"
+                  ? 48
+                  : 360) + (!open && state.corner ? 0 : usageWidth),
         }
       : {}),
   };
@@ -496,7 +637,7 @@ function App() {
         style={
           state.notch
             ? {
-                gridTemplateColumns: `1fr ${state.notch.width}px 1fr`,
+                gridTemplateColumns: `1fr ${state.notch.width}px 1fr${usageWidth ? ` ${usageWidth}px` : ""}`,
                 height: Math.max(40, state.notch.height),
                 minHeight: Math.max(40, state.notch.height),
               }
@@ -652,6 +793,7 @@ function App() {
             {["live", "demo"].includes(state.phase) && stateOrbs}
           </>
         )}
+        {usageSection}
       </header>
       <div className="panel-body" inert={!open} aria-hidden={!open}>
         {notifying ? (
@@ -820,6 +962,30 @@ function App() {
               </select>
             </label>
             <p>Idle time counts interaction with this notch.</p>
+            <label className="theme-setting">
+              Show provider usage
+              <input
+                type="checkbox"
+                checked={showUsage}
+                onChange={(event) => setShowUsage(event.target.checked)}
+              />
+            </label>
+            <p>
+              Five-hour allowance when available, otherwise weekly. Expand to
+              see both. Providers without usage are hidden.
+            </p>
+            {showUsage && (
+              <UsageSettings
+                usage={usage}
+                preferences={currentUsagePreferences}
+                onChange={(next) =>
+                  setUsagePreferences((previous) => ({
+                    ...previous,
+                    [environment]: next,
+                  }))
+                }
+              />
+            )}
             <p>T3 Code · Local environment</p>
             <div className="options">
               {state.origin && (

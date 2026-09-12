@@ -556,8 +556,8 @@ it("snaps every screen corner to a compact box and opens inward", () => {
     expect(dock).toHaveProperty("corner", corner);
     const closed = panelBounds(area, 40, null, dock);
     const open = panelBounds(area, 260, null, dock);
-    expect(closed.width).toBe(84);
-    expect(closed.height).toBe(84);
+    expect(closed.width).toBe(112);
+    expect(closed.height).toBe(76);
     expect(open.width).toBe(420);
     expect(open.height).toBe(260);
     const left = corner.endsWith("left");
@@ -582,4 +582,58 @@ it("can nudge back out of a corner without getting stuck", () => {
     edge: "bottom",
     offset: 0.5,
   });
+});
+
+it("extends the panel rightwards without moving the camera cutout", () => {
+  const area = { x: 0, y: 0, width: 1512, height: 982 };
+  const notch = { width: 184, height: 32, centerX: 756 };
+  const base = panelBounds(area, 40, notch);
+  const extended = panelBounds(
+    area,
+    40,
+    notch,
+    { edge: "top", offset: 0.5 },
+    192,
+  );
+  expect(extended).toEqual({ ...base, width: base.width + 192 });
+  for (const edge of ["top", "bottom", "left", "right"] as const) {
+    const bounds = panelBounds(area, 40, null, { edge, offset: 1 }, 600);
+    expect(bounds.x).toBeGreaterThanOrEqual(area.x);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(area.width);
+  }
+});
+
+it("snaps using the dragged panel boundary even when the grab point is far from the corner", () => {
+  const area = { x: -1200, y: -800, width: 1200, height: 800 };
+  const panel = { x: -800, y: -500, width: 400, height: 200 };
+  for (const [x, y, corner] of [
+    [-1190, -790, "top-left"],
+    [-410, -790, "top-right"],
+    [-1190, -210, "bottom-left"],
+    [-410, -210, "bottom-right"],
+  ] as const) {
+    for (const grab of [
+      { x: 10, y: 10 },
+      { x: 200, y: 30 },
+      { x: 390, y: 190 },
+    ]) {
+      const moved = dragBounds(
+        area,
+        panel,
+        { x: x + grab.x, y: y + grab.y },
+        grab,
+      );
+      expect(dockAt(area, moved).corner).toBe(corner);
+    }
+  }
+});
+it("does not widen a compact corner to place usage beside the status", () => {
+  const rect = panelBounds(
+    { x: 0, y: 0, width: 1200, height: 800 },
+    40,
+    null,
+    { edge: "top", offset: 0, corner: "top-left" },
+    200,
+  );
+  expect(rect.width).toBe(112);
 });

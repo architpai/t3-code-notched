@@ -138,7 +138,12 @@ export interface Bridge {
   connectLocal(remember: boolean): Promise<Result>;
   disconnect(): Promise<void>;
   lastMessage(threadId: string): Promise<MessagePreview>;
-  resize(height: number): Promise<void>;
+  usage(): Promise<import("./usage").UsagePreview>;
+  resize(
+    height: number,
+    extension?: number,
+    cornerUsageHeight?: number,
+  ): Promise<void>;
   movePanel(direction: Edge, nudge: boolean): Promise<void>;
   dragPanel(input: DragInput): Promise<void>;
   openThread(threadId: string): Promise<Result>;

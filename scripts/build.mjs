@@ -43,4 +43,5 @@ export async function buildDesktop() {
 if (process.argv[1]?.endsWith("build.mjs")) {
   await buildDesktop();
   await buildRenderer();
+  if (process.platform === "darwin") await import("./install-macos.mjs");
 }

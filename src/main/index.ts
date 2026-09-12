@@ -41,6 +41,8 @@ else
   void app.whenReady().then(async () => {
     app.setName("T3 Code Notched");
     let height = 40;
+    let extension = 0;
+    let cornerUsageHeight = 0;
     const placementFile = join(app.getPath("userData"), "placement.json");
     const savedPlacement = await readFile(placementFile, "utf8")
       .then((text) =>
@@ -93,7 +95,15 @@ else
         ? cutout
         : null;
     };
-    const bounds = () => panelBounds(display.bounds, height, notch(), dock);
+    const bounds = () =>
+      panelBounds(
+        display.bounds,
+        height,
+        notch(),
+        dock,
+        extension,
+        cornerUsageHeight,
+      );
     const window = new BrowserWindow({
       ...bounds(),
       title: "T3 Code Notched",
@@ -148,8 +158,8 @@ else
       corner: dock.corner ?? null,
       contentWidth: Math.max(
         1,
-        panelBounds(display.bounds, 300, notch(), dock).width -
-          (dock.edge === "left" || dock.edge === "right" ? 48 : 0) -
+        panelBounds(display.bounds, 300, notch(), dock, extension).width -
+          (dock.edge === "left" || dock.edge === "right" ? 48 + extension : 0) -
           2,
       ),
     });
@@ -197,14 +207,13 @@ else
       grab: { x: number; y: number };
       panel: ReturnType<typeof bounds>;
       displayId: number;
-      point: { x: number; y: number };
       moved: boolean;
     } | null = null;
     const finishDrag = () => {
       if (!drag || window.isDestroyed()) return;
-      const { point, moved } = drag;
+      const { moved } = drag;
       drag = null;
-      if (moved) dock = dockAt(display.bounds, point);
+      if (moved) dock = dockAt(display.bounds, window.getBounds());
       resize(true);
       publishPlacement();
       savePlacement();
@@ -324,10 +333,22 @@ else
       client.disconnect();
       await forgetCredential(credentialFile);
     });
+    handle("usage", () => client.usage());
     handle("last-message", (raw) => client.lastMessage(id.parse(raw)));
     handle("resize", (raw) => {
-      height = z.number().int().min(40).max(340).parse(raw);
+      const size = z
+        .object({
+          height: z.number().int().min(40).max(340),
+          extension: z.number().int().min(0).max(600),
+          cornerUsageHeight: z.number().int().min(0).max(240),
+        })
+        .strict()
+        .parse(raw);
+      height = size.height;
+      extension = size.extension;
+      cornerUsageHeight = size.cornerUsageHeight;
       if (!drag) resize(true);
+      publishPlacement();
     });
     handle("drag", (raw) => {
       const input = dragSchema.parse(raw);
@@ -345,12 +366,10 @@ else
           grab: { x: input.x - panel.x, y: input.y - panel.y },
           panel,
           displayId: display.id,
-          point: input,
           moved: false,
         };
       } else if (input.phase === "cancel") finishDrag();
       else if (drag) {
-        drag.point = input;
         drag.moved ||= isDragMovement(
           { x: drag.panel.x + drag.grab.x, y: drag.panel.y + drag.grab.y },
           input,

@@ -19,7 +19,8 @@
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "dist": "pnpm build && electron-builder",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "install:mac": "node scripts/install-macos.mjs --enable"
   },
   "dependencies": {
     "@fontsource/geist": "^5.2.0",
@@ -29,12 +30,14 @@
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "ws": "^8.21.3",
     "zod": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
     "electron": "44.2.0",
     "electron-builder": "26.15.3",
     "esbuild": "^0.27.0",

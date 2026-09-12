@@ -95,6 +95,34 @@ export function demoBridge(): Bridge {
       message: "Open the desktop app to connect to T3.",
     }),
     disconnect: async () => {},
+    usage: async () => ({
+      providers: ["codex", "claude", "opencode"].map((driver) => ({
+        instanceId: driver,
+        driver,
+        usageLimits: {
+          checkedAt: now,
+          windows: [
+            {
+              id: "session",
+              label: "Session",
+              kind: "session" as const,
+              windowDurationMins: 300,
+              usedPercent: 38,
+              resetsAt: new Date(Date.now() + 7200000).toISOString(),
+            },
+            {
+              id: "weekly",
+              label: "Weekly",
+              kind: "weekly" as const,
+              windowDurationMins: 10080,
+              usedPercent: 64,
+              resetsAt: new Date(Date.now() + 172800000).toISOString(),
+            },
+          ],
+        },
+      })),
+      error: null,
+    }),
     lastMessage: async () => ({
       text: '## Update\n\nThe compact panel is **ready**.\n\n- Replies support Markdown.\n- Use `Cmd+1` to switch threads.\n\n```ts\nconst view = "compact";\n```\n\n| Check | Result |\n| --- | --- |\n| Layout | Ready |\n| Keyboard | Ready |',
       error: null,

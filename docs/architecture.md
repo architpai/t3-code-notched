@@ -46,6 +46,31 @@ Main validates IPC inputs and checks the sender frame. Tokens stay in main;
 secure storage refuses an unprotected backend. Navigation, new windows, and
 permission requests are blocked.
 
+## Optional provider usage
+
+Notched targets T3 Code Nightly. The usage contract was checked against upstream
+commit `08463e2c401ce87858aaaebcb70ed86fb002fb5f` (`providerUsageLimits.ts`,
+`server.ts`, `rpc.ts`, and `ws.ts`). Usage reads call `server.getConfig` through
+T3's Effect JSON RPC at `/ws`, with the existing `orchestration:read` bearer token
+in the upgrade header. A short-lived socket reads the configuration and closes.
+Only validated provider names, instance IDs, limits, and observation times reach
+React. Provider auth data and other configuration fields are discarded.
+
+Provider icons and allowances occupy a separate extension to the right of the
+status orbs. The original header stays aligned with the camera cutout. Disabled
+or uninstalled providers and providers without usable limits are excluded.
+Collapsed mode prefers a five-hour window, then weekly. Expanded mode shows both
+windows vertically. Per-environment preferences can select any reported window
+independently for collapsed and expanded mode. Empty selections hide a provider;
+missing selections retain the automatic defaults. Preferences use validated local
+storage. Large provider lists scroll within a bounded extension.
+
+Usage is off by default. When enabled, it reads at most once per minute; concurrent
+reads share one request. Responses have an 8 MiB limit and a 10-second timeout.
+Disconnect cancels reads. Failed usage reads show no allowance and do not disable
+the thread monitor; stale shell connections hide the usage display. T3 owns the
+provider probes. Notched does not read provider files or request probes itself.
+
 ## Polling and replies
 
 Shell polling runs every 1.5 seconds during work and every 4 seconds otherwise.
@@ -70,7 +95,8 @@ Markdown permits no raw HTML, remote images, or active links.
 
 The panel stores display ID, edge, corner, and normalized offset in `placement.json`.
 Drag inputs use validated screen coordinates. Placement stays inside a current
-display, ignores gaps between displays, and snaps to an edge or corner on release.
+display, ignores gaps between displays, and snaps to an edge or corner on release using the panel bounds, not the grab
+point. Collapsed corners stack the brand, status, and provider usage vertically.
 Display changes and lost pointer input end dragging.
 
 On macOS, the native helper reads NSScreen safe-area and auxiliary geometry at

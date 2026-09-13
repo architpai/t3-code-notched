@@ -35,6 +35,7 @@ function thread(
       lastError: null,
     },
     hasPendingApprovals: state === "attention",
+    hasPendingUserInput: id === "layout",
   };
 }
 export function demoBridge(): Bridge {
@@ -43,6 +44,7 @@ export function demoBridge(): Bridge {
   let state: ViewState = {
     ...emptyState(),
     phase: "demo",
+    canAnswerQuestions: true,
     environmentId: "demo",
     origin: null,
     checkedAt: now,
@@ -60,7 +62,7 @@ export function demoBridge(): Bridge {
           "layout",
           "Refine the compact panel",
           "Codex",
-          "gpt-5.6-sol",
+          "gpt-6-astra",
           "running",
         ),
         thread(
@@ -123,7 +125,55 @@ export function demoBridge(): Bridge {
       })),
       error: null,
     }),
-    lastMessage: async () => ({
+    answerQuestion: async (input) => {
+      state = {
+        ...state,
+        shell: {
+          ...state.shell,
+          snapshotSequence: state.shell.snapshotSequence + 1,
+          threads: state.shell.threads.map((t) =>
+            t.id === input.threadId ? { ...t, hasPendingUserInput: false } : t,
+          ),
+        },
+      };
+      for (const listener of listeners) listener(state);
+      return {
+        ok: true,
+        message: "Demo answer accepted. No agent was contacted.",
+        retryable: false,
+      };
+    },
+    lastMessage: async (threadId) => ({
+      questions:
+        threadId === "layout" &&
+        state.shell.threads.find((t) => t.id === threadId)?.hasPendingUserInput
+          ? [
+              {
+                requestId: "demo-question",
+                responseMode: "message",
+                questions: [
+                  {
+                    id: "0",
+                    header: "Question",
+                    question:
+                      "Which theme should I use for the settings panel?",
+                    options: [
+                      {
+                        label: "Match the system",
+                        description: "Use the current desktop appearance.",
+                      },
+                      {
+                        label: "Graphite",
+                        description: "Keep the dark theme.",
+                      },
+                    ],
+                    allowCustomAnswer: true,
+                    multiSelect: false,
+                  },
+                ],
+              },
+            ]
+          : [],
       text: '## Update\n\nThe compact panel is **ready**.\n\n- Replies support Markdown.\n- Use `Cmd+1` to switch threads.\n\n```ts\nconst view = "compact";\n```\n\n| Check | Result |\n| --- | --- |\n| Layout | Ready |\n| Keyboard | Ready |',
       error: null,
     }),

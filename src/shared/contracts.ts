@@ -76,6 +76,7 @@ export const connectSchema = z
     origin: z.string().max(2048),
     pairingCode: z.string().min(1).max(8192),
     remember: z.boolean(),
+    allowAnswers: z.boolean().optional(),
   })
   .strict();
 export type Thread = z.infer<typeof threadSchema>;
@@ -121,6 +122,7 @@ export interface ViewState {
   environmentId: string | null;
   origin: string | null;
   checkedAt: string | null;
+  canAnswerQuestions: boolean;
   shell: Shell;
 }
 export interface Result {
@@ -128,6 +130,7 @@ export interface Result {
   message: string;
 }
 export interface MessagePreview {
+  questions?: import("./questions").AsyncQuestion[];
   text: string | null;
   error: string | null;
 }
@@ -135,7 +138,10 @@ export interface Bridge {
   getState(): Promise<ViewState>;
   subscribe(listener: (state: ViewState) => void): () => void;
   connect(input: ConnectInput): Promise<Result>;
-  connectLocal(remember: boolean): Promise<Result>;
+  connectLocal(remember: boolean, allowAnswers?: boolean): Promise<Result>;
+  answerQuestion(
+    input: import("./questions").QuestionAnswer,
+  ): Promise<import("./questions").QuestionAnswerResult>;
   disconnect(): Promise<void>;
   lastMessage(threadId: string): Promise<MessagePreview>;
   usage(): Promise<import("./usage").UsagePreview>;
@@ -160,6 +166,7 @@ export function emptyState(): ViewState {
     environmentId: null,
     origin: null,
     checkedAt: null,
+    canAnswerQuestions: false,
     shell: { snapshotSequence: 0, projects: [], threads: [] },
   };
 }
@@ -214,15 +221,20 @@ export function monitorThreads(threads: Thread[], settled = false): Thread[] {
     );
 }
 
+export const maxPanelHeight = 600;
+
 export function monitorHeight(
   expanded: boolean,
   settings: boolean,
   rows: number,
   notice: boolean,
+  question = false,
 ): number {
   return !expanded
     ? 40
-    : settings
-      ? 300
-      : (rows ? 300 : 150) + (notice ? 40 : 0);
+    : question && !settings
+      ? maxPanelHeight
+      : settings
+        ? 300
+        : (rows ? 300 : 150) + (notice ? 40 : 0);
 }

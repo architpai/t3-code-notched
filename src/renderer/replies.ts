@@ -16,7 +16,12 @@ export function reconcilePreviews(
   let unchanged = Object.keys(previous).length === Object.keys(next).length;
   for (const [id, value] of Object.entries(next)) {
     const old = previous[id];
-    if (old && old.text === value.text && old.error === value.error)
+    if (
+      old &&
+      old.text === value.text &&
+      old.error === value.error &&
+      JSON.stringify(old.questions) === JSON.stringify(value.questions)
+    )
       next[id] = old;
     else unchanged = false;
   }
@@ -42,6 +47,43 @@ export function newlySettled(
   if (!previous) return [];
   const active = new Set(monitorThreads(previous).map((thread) => thread.id));
   return monitorThreads(next, true).filter((thread) => active.has(thread.id));
+}
+
+export interface QuestionPrompt {
+  key: string;
+  threadId: string;
+}
+
+export function pendingQuestionPrompts(
+  state: ViewState,
+  previews: Record<string, MessagePreview>,
+): QuestionPrompt[] {
+  if (state.phase !== "live" && state.phase !== "demo") return [];
+  return monitorThreads(state.shell.threads).flatMap((thread) =>
+    thread.hasPendingUserInput && !previews[thread.id]?.error
+      ? (previews[thread.id]?.questions ?? [])
+          .filter((q) => q.submission !== "accepted")
+          .map((q) => ({
+            key: JSON.stringify([
+              state.origin,
+              state.environmentId,
+              thread.id,
+              q.requestId,
+            ]),
+            threadId: thread.id,
+          }))
+      : [],
+  );
+}
+
+export function nextQuestionPrompt(
+  prompts: QuestionPrompt[],
+  seen: ReadonlySet<string>,
+  activeThreadId?: string,
+): QuestionPrompt | undefined {
+  // Keep the current question in place while the user answers it.
+  if (prompts.some((q) => q.threadId === activeThreadId)) return undefined;
+  return prompts.find((q) => !seen.has(q.key));
 }
 
 export interface NotificationClock {
@@ -198,7 +240,12 @@ export function useReplies(bridge: Bridge, state: ViewState, paused = false) {
       }
       const displayed = Object.fromEntries(known);
       for (const { id, value } of results)
-        if (value.error && !known.has(id)) displayed[id] = value;
+        if (value.error)
+          displayed[id] = {
+            ...value,
+            text: known.get(id)?.text ?? null,
+            questions: [],
+          };
       setPreviews((previous) => reconcilePreviews(previous, displayed));
       if (changed.length) {
         setUpdates((previous) =>

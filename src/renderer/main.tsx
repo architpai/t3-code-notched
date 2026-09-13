@@ -28,10 +28,16 @@ import {
   type SavedUsagePreferences,
   type UsagePreview,
 } from "../shared/usage";
+import { QuestionPanel } from "./QuestionPanel";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { demoBridge } from "./demo";
 import { watchInactivity } from "./inactivity";
-import { useReplies, countdownDelay } from "./replies";
+import {
+  useReplies,
+  countdownDelay,
+  pendingQuestionPrompts,
+  nextQuestionPrompt,
+} from "./replies";
 import "@fontsource/geist/400.css";
 import "@fontsource/geist/500.css";
 import "@fontsource/geist/600.css";
@@ -239,24 +245,44 @@ function App() {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const runContent = useRef<HTMLDivElement>(null);
+  const panelBody = useRef<HTMLDivElement>(null);
+  const [questionFooter, setQuestionFooter] = useState<HTMLDivElement | null>(
+    null,
+  );
   const [cardHeight, setCardHeight] = useState(260);
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [origin, setOrigin] = useState("http://127.0.0.1:3773");
   const [pairingCode, setPairingCode] = useState("");
   const [remember, setRemember] = useState(false);
-  const changeExpanded = (value: boolean) => {
+  const [allowAnswers, setAllowAnswers] = useState(true);
+  const questionDrafts = useRef(new Map<string, Record<string, string>>());
+  const seenQuestions = useRef(new Set<string>());
+  const questionPrompts = useMemo(
+    () => pendingQuestionPrompts(state, replies.previews),
+    [state, replies.previews],
+  );
+  const holdQuestion = questionPrompts.some((q) => q.threadId === selectedId);
+  useEffect(() => {
+    if (state.phase === "live") setAllowAnswers(state.canAnswerQuestions);
+  }, [state.phase, state.canAnswerQuestions]);
+  const changeExpanded = (value: boolean, dismissQuestions = true) => {
+    if (!value && dismissQuestions)
+      for (const question of questionPrompts)
+        seenQuestions.current.add(question.key);
     setExpanded(value);
     if (!value) setSettings(false);
     replies.dismissUpdates();
   };
   useEffect(() => {
-    if (!expanded || pending || readingNotification) return;
+    if (!expanded || pending || readingNotification || holdQuestion) return;
     return watchInactivity(document, idleSeconds * 1000, () => {
       if (dragPoint.current) return;
       changeExpanded(false);
     });
-  }, [expanded, pending, idleSeconds, readingNotification]);
+  }, [expanded, pending, idleSeconds, readingNotification, holdQuestion]);
+  const closePanel = useRef(() => changeExpanded(false));
+  closePanel.current = () => changeExpanded(false);
   useEffect(() => {
     let disposed = false;
     const off = bridge.subscribe((value) => {
@@ -268,7 +294,7 @@ function App() {
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         endDrag("cancel");
-        changeExpanded(false);
+        closePanel.current();
       }
     };
     document.addEventListener("keydown", key);
@@ -289,6 +315,20 @@ function App() {
   useEffect(() => {
     if (selected) setSelectedId(selected.id);
   }, [selected?.id]);
+  useEffect(() => {
+    if (settings || pending || dragPointer.current !== null) return;
+    const prompt = nextQuestionPrompt(
+      questionPrompts,
+      seenQuestions.current,
+      expanded ? selected?.id : undefined,
+    );
+    if (!prompt) return;
+    seenQuestions.current.add(prompt.key);
+    setSelectedId(prompt.threadId);
+    setExpanded(true);
+    panelBody.current?.scrollTo(0, 0);
+    replies.dismissUpdates();
+  }, [questionPrompts, settings, pending, expanded, selected?.id]);
   const selectThread = (index: number) => {
     const thread = visible[index];
     if (!thread) return;
@@ -472,6 +512,8 @@ function App() {
     return thread && replies.previews[id]?.text ? [thread] : [];
   });
   const notifying =
+    !holdQuestion &&
+    !settings &&
     ((!expanded && notifications.length > 0) || Boolean(settlement)) &&
     ["live", "demo"].includes(state.phase);
   useEffect(() => {
@@ -515,8 +557,8 @@ function App() {
   async function connect(local: boolean) {
     const result = await action(() =>
       local
-        ? bridge.connectLocal(remember)
-        : bridge.connect({ origin, pairingCode, remember }),
+        ? bridge.connectLocal(remember, allowAnswers)
+        : bridge.connect({ origin, pairingCode, remember, allowAnswers }),
     );
     setPairingCode("");
     if (result?.ok) setSettings(false);
@@ -536,6 +578,7 @@ function App() {
     showSettings,
     visible.length,
     Boolean(notice || state.error || state.phase === "stale"),
+    holdQuestion,
   );
   const height = notifying
     ? 210
@@ -545,6 +588,7 @@ function App() {
           Math.max(
             150,
             cardHeight +
+              (holdQuestion ? 50 : 0) +
               Math.max(40, state.notch?.height ?? 40) +
               (notice || state.error || state.phase === "stale" ? 40 : 0) +
               2,
@@ -795,7 +839,12 @@ function App() {
         )}
         {usageSection}
       </header>
-      <div className="panel-body" inert={!open} aria-hidden={!open}>
+      <div
+        ref={panelBody}
+        className="panel-body"
+        inert={!open}
+        aria-hidden={!open}
+      >
         {notifying ? (
           <section
             className="notifications"
@@ -886,54 +935,75 @@ function App() {
             {state.origin && (
               <p className="connection-origin">{state.origin}</p>
             )}
-            {state.phase !== "live" && (
-              <>
-                <button
-                  className="primary"
-                  disabled={pending || demo}
-                  onClick={() => void connect(true)}
-                >
-                  {pending ? "Connecting…" : "Connect local T3"}
-                </button>
-                <div className="options">
+            <>
+              <button
+                className="primary"
+                disabled={pending || demo}
+                onClick={() => void connect(true)}
+              >
+                {pending
+                  ? "Connecting…"
+                  : state.phase === "live"
+                    ? "Reconnect local T3"
+                    : "Connect local T3"}
+              </button>
+              <div className="options">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                  />
+                  Remember securely
+                </label>
+              </div>
+              <label className="answer-permission">
+                <input
+                  type="checkbox"
+                  checked={allowAnswers}
+                  onChange={(event) => setAllowAnswers(event.target.checked)}
+                />
+                Allow question answers
+              </label>
+              <p>
+                Enabled by default. Grants T3 operation access so Notched can
+                send answers to async questions. Reconnect to apply changes.
+              </p>
+              <details>
+                <summary>Use a pairing code</summary>
+                <div className="pairing">
                   <label>
+                    T3 address
                     <input
-                      type="checkbox"
-                      checked={remember}
-                      onChange={(e) => setRemember(e.target.checked)}
+                      value={origin}
+                      onChange={(e) => setOrigin(e.target.value)}
+                      autoComplete="off"
                     />
-                    Remember securely
                   </label>
+                  <label>
+                    Pairing code
+                    <input
+                      type="password"
+                      value={pairingCode}
+                      onChange={(e) => setPairingCode(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button
+                    disabled={pending || !pairingCode || demo}
+                    onClick={() => void connect(false)}
+                  >
+                    Connect with code
+                  </button>
                 </div>
-                <details>
-                  <summary>Use a pairing code</summary>
-                  <div className="pairing">
-                    <label>
-                      T3 address
-                      <input
-                        value={origin}
-                        onChange={(e) => setOrigin(e.target.value)}
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label>
-                      Pairing code
-                      <input
-                        type="password"
-                        value={pairingCode}
-                        onChange={(e) => setPairingCode(e.target.value)}
-                        autoComplete="off"
-                      />
-                    </label>
-                    <button
-                      disabled={pending || !pairingCode || demo}
-                      onClick={() => void connect(false)}
-                    >
-                      Connect with code
-                    </button>
-                  </div>
-                </details>
-              </>
+              </details>
+            </>
+            {state.phase === "live" && (
+              <p>
+                {state.canAnswerQuestions
+                  ? "Question answers enabled."
+                  : "Read-only connection. Reconnect with Allow question answers selected to send answers."}
+              </p>
             )}
             <label className="theme-setting">
               Color theme
@@ -1061,8 +1131,12 @@ function App() {
               )}
               {(selected ? [selected] : []).map((thread) => {
                 const status = statusOf(thread);
-                const activity =
-                  thread.planProgress && status === "working"
+                const activity = thread.hasPendingUserInput
+                  ? thread.latestTurn?.state === "running" ||
+                    thread.backgroundLiveness
+                    ? "Working · Question pending"
+                    : "Question pending"
+                  : thread.planProgress && status === "working"
                     ? `${thread.planProgress.completedSteps}/${thread.planProgress.totalSteps} · ${thread.planProgress.step}`
                     : status === "attention"
                       ? "Continue in T3"
@@ -1102,6 +1176,42 @@ function App() {
                           readable={["live", "demo"].includes(state.phase)}
                         />
                       )}
+                      {["live", "demo"].includes(state.phase) &&
+                        thread.hasPendingUserInput &&
+                        replies.previews[thread.id]?.questions?.map(
+                          (request, requestIndex) => {
+                            const draftKey = JSON.stringify([
+                              state.origin,
+                              state.environmentId,
+                              thread.id,
+                              request.requestId,
+                            ]);
+                            return (
+                              <QuestionPanel
+                                key={draftKey}
+                                draftKey={draftKey}
+                                footer={questionFooter}
+                                drafts={questionDrafts.current}
+                                request={request}
+                                threadId={thread.id}
+                                bridge={bridge}
+                                canAnswer={state.canAnswerQuestions}
+                                active={
+                                  expanded &&
+                                  !showSettings &&
+                                  requestIndex === 0
+                                }
+                                busy={pending}
+                                onBusy={setPending}
+                                onSettings={() => {
+                                  setSettings(true);
+                                  panelBody.current?.scrollTo(0, 0);
+                                }}
+                                onAccepted={() => changeExpanded(false, false)}
+                              />
+                            );
+                          },
+                        )}
                     </div>
                   </article>
                 );
@@ -1118,6 +1228,9 @@ function App() {
           </div>
         )}
       </div>
+      {expanded && !showSettings && holdQuestion && (
+        <div className="question-footer" ref={setQuestionFooter} />
+      )}
     </main>
   );
 }

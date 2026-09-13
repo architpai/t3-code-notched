@@ -1,4 +1,9 @@
-import type { Corner, Edge, Notch } from "./contracts";
+import {
+  maxPanelHeight,
+  type Corner,
+  type Edge,
+  type Notch,
+} from "./contracts";
 export interface Rect {
   x: number;
   y: number;
@@ -82,7 +87,7 @@ export function panelBounds(
   const height = Math.min(
     Math.max(
       compactCorner ? 76 + cornerUsageHeight : side ? 160 : 40,
-      Math.min(340, requestedHeight),
+      Math.min(maxPanelHeight, requestedHeight),
     ),
     area.height,
   );

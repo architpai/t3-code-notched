@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import {
+  maxPanelHeight,
   connectSchema,
   id,
   edgeSchema,
@@ -35,6 +36,7 @@ import {
   saveCredential,
   forgetCredential,
 } from "./credentials";
+import { answerSchema } from "../shared/questions";
 import { localPairing } from "./local-pairing";
 if (!app.requestSingleInstanceLock()) app.quit();
 else
@@ -320,25 +322,31 @@ else
     handle("connect", connect);
     handle("local", async (raw) => {
       try {
-        const options = z.object({ remember: z.boolean() }).strict().parse(raw);
+        const options = z
+          .object({
+            remember: z.boolean(),
+            allowAnswers: z.boolean().optional(),
+          })
+          .strict()
+          .parse(raw);
         return await connect({ ...(await localPairing()), ...options });
-      } catch {
-        return {
-          ok: false,
-          message: "Open T3 Code, or use a pairing code below.",
-        };
+      } catch (error) {
+        return { ok: false, message: safeError(error) };
       }
     });
     handle("disconnect", async () => {
       client.disconnect();
       await forgetCredential(credentialFile);
     });
+    handle("answer-question", (raw) =>
+      client.answerQuestion(answerSchema.parse(raw)),
+    );
     handle("usage", () => client.usage());
     handle("last-message", (raw) => client.lastMessage(id.parse(raw)));
     handle("resize", (raw) => {
       const size = z
         .object({
-          height: z.number().int().min(40).max(340),
+          height: z.number().int().min(40).max(maxPanelHeight),
           extension: z.number().int().min(0).max(600),
           cornerUsageHeight: z.number().int().min(0).max(240),
         })

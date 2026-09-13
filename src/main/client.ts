@@ -1,3 +1,13 @@
+import { randomUUID } from "node:crypto";
+import {
+  activitiesSchema,
+  pendingQuestions,
+  answerSchema,
+  validAnswers,
+  type AsyncQuestion,
+  type QuestionAnswer,
+  type QuestionAnswerResult,
+} from "../shared/questions";
 import { readUsage } from "./usage";
 import type { UsagePreview } from "../shared/usage";
 import { z } from "zod";
@@ -21,12 +31,17 @@ export interface Credential {
   origin: string;
   environmentId: string;
   token: string;
+  allowAnswers?: boolean | undefined;
 }
 export class T3Client {
   state = emptyState();
   private credential: Credential | null = null;
   private abort = new AbortController();
   private epoch = 0;
+  private submissions = new Map<
+    string,
+    NonNullable<AsyncQuestion["submission"]>
+  >();
   private usageRead: { at: number; result: Promise<UsagePreview> } | null =
     null;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -44,6 +59,7 @@ export class T3Client {
     this.state = {
       ...this.state,
       phase: "disconnected",
+      canAnswerQuestions: false,
       error: null,
     };
     this.emit();
@@ -59,7 +75,10 @@ export class T3Client {
       const env = environmentSchema.parse(
         await request(origin, "/.well-known/t3/environment", null, signal),
       );
-      const scope = "orchestration:read";
+      const allowAnswers = input.allowAnswers ?? true;
+      const scope = allowAnswers
+        ? "orchestration:read orchestration:operate"
+        : "orchestration:read";
       const form = new URLSearchParams({
         grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
         subject_token: input.pairingCode,
@@ -72,12 +91,17 @@ export class T3Client {
       const grant = tokenSchema.parse(
         await request(origin, "/oauth/token", null, signal, form),
       );
-      if (!grant.scope.split(" ").includes("orchestration:read"))
+      if (
+        !scope
+          .split(" ")
+          .every((value) => grant.scope.split(" ").includes(value))
+      )
         throw new Error("T3 did not grant the requested access.");
       const credential = {
         origin,
         environmentId: env.environmentId,
         token: grant.access_token,
+        allowAnswers,
       };
       if (epoch !== this.epoch) throw new Error("Connection cancelled.");
       this.credential = credential;
@@ -156,6 +180,9 @@ export class T3Client {
         phase: "live",
         error: null,
         checkedAt: new Date().toISOString(),
+        canAnswerQuestions:
+          c.allowAnswers === true &&
+          auth.scopes.includes("orchestration:operate"),
       };
       this.emit();
     } catch (error) {
@@ -163,6 +190,7 @@ export class T3Client {
       this.state = {
         ...this.state,
         phase: "stale",
+        canAnswerQuestions: false,
         error: safeError(error),
       };
       this.emit();
@@ -202,6 +230,89 @@ export class T3Client {
       this.state.shell.threads.some((t) => t.id === target && !t.archivedAt)
     );
   }
+  private questionKey(threadId: string, requestId: string): string {
+    return JSON.stringify([this.state.environmentId, threadId, requestId]);
+  }
+  async answerQuestion(raw: QuestionAnswer): Promise<QuestionAnswerResult> {
+    const input = answerSchema.parse(raw);
+    const c = this.credential;
+    const epoch = this.epoch;
+    if (
+      !c ||
+      !this.state.canAnswerQuestions ||
+      !this.canOpenThread(input.threadId)
+    )
+      return {
+        ok: false,
+        message: "Reconnect with Allow question answers enabled.",
+        retryable: true,
+      };
+    const key = this.questionKey(input.threadId, input.requestId);
+    if (this.submissions.has(key))
+      return {
+        ok: false,
+        message: "An answer was already sent or is in progress. Check T3.",
+        retryable: false,
+      };
+    // ponytail: retain at most 1000 submissions per app session; check T3 if this limit is reached.
+    if (this.submissions.size >= 1000)
+      return {
+        ok: false,
+        message: "Answer limit reached. Continue in T3.",
+        retryable: false,
+      };
+    this.submissions.set(key, "sending");
+    const detail = await this.lastMessage(input.threadId);
+    const question = detail.questions?.find(
+      (q) => q.requestId === input.requestId,
+    );
+    if (
+      detail.error ||
+      !question ||
+      !validAnswers(question, input.answers) ||
+      epoch !== this.epoch ||
+      !this.state.canAnswerQuestions ||
+      !this.canOpenThread(input.threadId)
+    ) {
+      this.submissions.delete(key);
+      return {
+        ok: false,
+        message: "Question changed or answers are incomplete. Check T3.",
+        retryable: true,
+      };
+    }
+    try {
+      z.object({ sequence: z.number().int().nonnegative() }).parse(
+        await request(
+          c.origin,
+          "/api/orchestration/dispatch",
+          c.token,
+          this.abort.signal,
+          {
+            type: "thread.user-input.respond",
+            commandId: randomUUID(),
+            threadId: input.threadId,
+            requestId: input.requestId,
+            answers: input.answers,
+            createdAt: new Date().toISOString(),
+          },
+        ),
+      );
+      this.submissions.set(key, "accepted");
+      return {
+        ok: true,
+        message: "Answer accepted by T3. Check T3 for agent progress.",
+        retryable: false,
+      };
+    } catch {
+      this.submissions.set(key, "uncertain");
+      return {
+        ok: false,
+        message: "Answer not confirmed. Check T3 before sending anything else.",
+        retryable: false,
+      };
+    }
+  }
   async lastMessage(threadId: string): Promise<MessagePreview> {
     const target = id.parse(threadId);
     const c = this.credential;
@@ -218,6 +329,7 @@ export class T3Client {
         .object({
           thread: z.object({
             id,
+            activities: activitiesSchema.optional(),
             messages: z
               .array(
                 z.object({
@@ -256,6 +368,14 @@ export class T3Client {
       return {
         text: latest ? (text ? text : "Agent message has no text.") : null,
         error: null,
+        questions: pendingQuestions(detail.thread.activities ?? []).map(
+          (question) => {
+            const submission = this.submissions.get(
+              this.questionKey(target, question.requestId),
+            );
+            return submission ? { ...question, submission } : question;
+          },
+        ),
       };
     } catch {
       return { text: null, error: "Cannot load the last message. Try again." };

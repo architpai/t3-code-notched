@@ -6,6 +6,7 @@ const schema = z.object({
   origin: z.string(),
   environmentId: z.string(),
   token: z.string().min(1).max(8192),
+  allowAnswers: z.boolean().optional(),
 });
 export async function saveCredential(file: string, value: Credential) {
   if (

@@ -8,7 +8,10 @@ const bridge: Bridge = {
     return () => ipcRenderer.removeListener("notched:update", handler);
   },
   connect: (input) => ipcRenderer.invoke("notched:connect", input),
-  connectLocal: (remember) => ipcRenderer.invoke("notched:local", { remember }),
+  connectLocal: (remember, allowAnswers = true) =>
+    ipcRenderer.invoke("notched:local", { remember, allowAnswers }),
+  answerQuestion: (input) =>
+    ipcRenderer.invoke("notched:answer-question", input),
   disconnect: () => ipcRenderer.invoke("notched:disconnect"),
   usage: () => ipcRenderer.invoke("notched:usage"),
   lastMessage: (threadId) =>

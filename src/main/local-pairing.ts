@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +10,24 @@ export async function localPairing(): Promise<{
   origin: string;
   pairingCode: string;
 }> {
+  if (process.platform !== "darwin")
+    throw new Error("T3 local pairing requires macOS. Use a pairing code.");
+  const name = ["T3 Code (Nightly)", "T3 Code (Alpha)"].find((name) =>
+    existsSync(join("/Applications", `${name}.app`, "Contents", "MacOS", name)),
+  );
+  if (!name)
+    throw new Error(
+      "T3 Code was not found in /Applications. Use a pairing code.",
+    );
+  const app = join("/Applications", `${name}.app`, "Contents");
   const home = join(homedir(), ".t3");
-  const data = await readFile(join(home, "userdata", "server-runtime.json"));
+  const data = await readFile(
+    join(home, "userdata", "server-runtime.json"),
+  ).catch(() => {
+    throw new Error(
+      "T3 runtime is unavailable. Open T3 Code, or use a pairing code.",
+    );
+  });
   if (data.length > 8192) throw new Error("T3 runtime file is too large.");
   const runtime = z
     .object({ origin: z.string() })
@@ -24,11 +41,8 @@ export async function localPairing(): Promise<{
       AbortSignal.timeout(10_000),
     ),
   );
-  if (process.platform !== "darwin")
-    throw new Error("Use a pairing code from T3 on this platform.");
-  const app = "/Applications/T3 Code (Alpha).app/Contents";
   const result = await promisify(execFile)(
-    join(app, "MacOS/T3 Code (Alpha)"),
+    join(app, "MacOS", name),
     [
       join(app, "Resources/app.asar/apps/server/dist/bin.mjs"),
       "auth",
@@ -47,7 +61,11 @@ export async function localPairing(): Promise<{
       maxBuffer: 16_384,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     },
-  );
+  ).catch(() => {
+    throw new Error(
+      "T3 pairing failed. Use a pairing code from your T3 installation.",
+    );
+  });
   const grant = z
     .object({ credential: z.string().min(1).max(8192) })
     .parse(JSON.parse(result.stdout));

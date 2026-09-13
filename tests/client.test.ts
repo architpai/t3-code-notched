@@ -57,6 +57,8 @@ async function fixture(
     shell?: unknown;
     detail?: unknown;
     detailDelay?: number;
+    operate?: boolean;
+    loseDispatch?: boolean;
   } = {},
 ) {
   const commands: unknown[] = [];
@@ -91,7 +93,9 @@ async function fixture(
       }
       return send({
         authenticated: true,
-        scopes: ["orchestration:read"],
+        scopes: options.operate
+          ? ["orchestration:read", "orchestration:operate"]
+          : ["orchestration:read"],
       });
     }
     if (path === "/api/orchestration/shell") {
@@ -107,6 +111,7 @@ async function fixture(
     }
     if (path === "/api/orchestration/dispatch") {
       commands.push(JSON.parse(body));
+      if (options.loseDispatch) return res.destroy();
       return send({ sequence: 13 });
     }
     if (path === "/api/orchestration/threads/thread-1?turnLimit=2") {
@@ -163,6 +168,7 @@ describe("T3 boundary", () => {
       origin: f.origin,
       pairingCode: "fake",
       remember: false,
+      allowAnswers: false,
     });
     expect(f.authorizations.some((r) => r.path.includes("/threads/"))).toBe(
       false,
@@ -176,6 +182,7 @@ describe("T3 boundary", () => {
     expect(await client!.lastMessage("thread-1")).toEqual({
       text: "Latest assistant reply",
       error: null,
+      questions: [],
     });
     expect(
       f.authorizations
@@ -250,6 +257,7 @@ describe("T3 boundary", () => {
       expect(await client!.lastMessage("thread-1")).toEqual({
         text: expected,
         error: null,
+        questions: [],
       });
     },
   );
@@ -291,6 +299,7 @@ describe("T3 boundary", () => {
       origin: f.origin,
       pairingCode: "fake",
       remember: false,
+      allowAnswers: false,
     });
     expect(client!.state.phase).toBe("live");
     expect(f.scopes).toEqual(["orchestration:read"]);
@@ -465,7 +474,7 @@ describe("pure policy", () => {
       for (const offset of [0, 0.25, 0.5, 1]) {
         const compact = panelBounds(area, 40, null, { edge, offset });
         const expanded = panelBounds(area, 2000, null, { edge, offset });
-        expect(expanded.height).toBe(340);
+        expect(expanded.height).toBe(600);
         for (const rect of [compact, expanded]) {
           expect(rect.x).toBeGreaterThanOrEqual(area.x);
           expect(rect.y).toBeGreaterThanOrEqual(area.y);
@@ -517,6 +526,9 @@ describe("pure policy", () => {
     ).toEqual({ x: -966, y: -982, width: 420, height: 135 });
     expect(monitorHeight(false, false, 63, false)).toBe(40);
     expect(monitorHeight(true, false, 1, false)).toBe(300);
+    expect(monitorHeight(true, false, 1, false, true)).toBe(600);
+    expect(monitorHeight(false, false, 1, false, true)).toBe(40);
+    expect(monitorHeight(true, true, 1, false, true)).toBe(300);
     expect(monitorHeight(true, false, 63, false)).toBe(300);
     expect(panelBounds({ x: 0, y: 0, width: 300, height: 100 }, 260)).toEqual({
       x: 0,
@@ -636,4 +648,153 @@ it("does not widen a compact corner to place usage beside the status", () => {
     200,
   );
   expect(rect.width).toBe(112);
+});
+
+const asyncRequest = {
+  requestId: "async-1",
+  responseMode: "message",
+  questions: [
+    {
+      id: "0",
+      header: "Choice",
+      question: "Which theme?",
+      options: [{ label: "Dark", description: "", value: "dark" }],
+      allowCustomAnswer: false,
+    },
+  ],
+};
+const questionDetail = {
+  thread: {
+    id: "thread-1",
+    messages: [],
+    activities: [
+      {
+        id: "a",
+        kind: "user-input.requested",
+        createdAt: now,
+        payload: asyncRequest,
+      },
+    ],
+  },
+  page: { hasMore: true },
+};
+const answer = {
+  threadId: "thread-1",
+  requestId: "async-1",
+  answers: { "0": "dark" },
+};
+it("respects disabled answers and enables answers by default on a new connection", async () => {
+  const f = await fixture({ operate: true, detail: questionDetail });
+  await client!.connect({
+    origin: f.origin,
+    pairingCode: "fake",
+    remember: false,
+    allowAnswers: false,
+  });
+  expect(client!.state.canAnswerQuestions).toBe(false);
+  expect((await client!.lastMessage("thread-1")).questions).toMatchObject([
+    asyncRequest,
+  ]);
+  expect((await client!.answerQuestion(answer)).ok).toBe(false);
+  const credential = await client!.connect({
+    origin: f.origin,
+    pairingCode: "fake",
+    remember: false,
+  });
+  expect(f.scopes.at(-1)).toBe("orchestration:read orchestration:operate");
+  expect(client!.state.canAnswerQuestions).toBe(true);
+  expect(
+    (await client!.answerQuestion({ ...answer, answers: { "0": "invalid" } }))
+      .ok,
+  ).toBe(false);
+  const results = await Promise.all([
+    client!.answerQuestion(answer),
+    client!.answerQuestion(answer),
+  ]);
+  expect(results.filter((r) => r.ok)).toHaveLength(1);
+  expect(f.commands).toHaveLength(1);
+  expect(f.commands[0]).toMatchObject({
+    ...answer,
+    type: "thread.user-input.respond",
+    commandId: expect.any(String),
+  });
+  expect(JSON.stringify(f.commands)).not.toContain("fake-test-token");
+  expect(
+    (await client!.lastMessage("thread-1")).questions?.[0]?.submission,
+  ).toBe("accepted");
+  await client!.restore(credential);
+  expect((await client!.answerQuestion(answer)).ok).toBe(false);
+  expect(f.commands).toHaveLength(1);
+});
+it("blocks uncertain resends even after reconnecting", async () => {
+  const f = await fixture({
+    operate: true,
+    detail: questionDetail,
+    loseDispatch: true,
+  });
+  const credential = await client!.connect({
+    origin: f.origin,
+    pairingCode: "fake",
+    remember: false,
+    allowAnswers: true,
+  });
+  expect(await client!.answerQuestion(answer)).toMatchObject({
+    ok: false,
+    retryable: false,
+    message: expect.stringContaining("not confirmed"),
+  });
+  await client!.restore(credential);
+  expect(
+    (await client!.lastMessage("thread-1")).questions?.[0]?.submission,
+  ).toBe("uncertain");
+  expect((await client!.answerQuestion(answer)).ok).toBe(false);
+  expect(f.commands).toHaveLength(1);
+});
+it("does not answer a resolved question, a different thread, or without the granted scope", async () => {
+  const f = await fixture({ detail: questionDetail });
+  await client!.connect({
+    origin: f.origin,
+    pairingCode: "fake",
+    remember: false,
+    allowAnswers: true,
+  });
+  expect(client!.state.canAnswerQuestions).toBe(false);
+  expect((await client!.answerQuestion(answer)).ok).toBe(false);
+  expect(f.commands).toEqual([]);
+});
+it("rechecks question resolution before dispatch", async () => {
+  const detail = structuredClone(questionDetail);
+  const f = await fixture({ operate: true, detail });
+  await client!.connect({
+    origin: f.origin,
+    pairingCode: "fake",
+    remember: false,
+    allowAnswers: true,
+  });
+  expect((await client!.lastMessage("thread-1")).questions).toHaveLength(1);
+  detail.thread.activities = [];
+  expect((await client!.answerQuestion(answer)).ok).toBe(false);
+  expect(
+    (await client!.answerQuestion({ ...answer, threadId: "other" })).ok,
+  ).toBe(false);
+  expect((await client!.lastMessage("thread-1")).questions).toEqual([]);
+  expect(f.commands).toEqual([]);
+});
+it("cancels an answer if disconnected during its fresh question read", async () => {
+  const f = await fixture({
+    operate: true,
+    detail: questionDetail,
+    detailDelay: 100,
+  });
+  await client!.connect({
+    origin: f.origin,
+    pairingCode: "fake",
+    remember: false,
+    allowAnswers: true,
+  });
+  const pending = client!.answerQuestion(answer);
+  client!.disconnect();
+  expect((await pending).ok).toBe(false);
+  expect(client!.state.canAnswerQuestions).toBe(false);
+  expect(f.commands).toEqual([]);
 });
